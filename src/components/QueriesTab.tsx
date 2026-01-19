@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, Loader2 } from 'lucide-react';
+import { Play, Loader2, Code } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,7 @@ interface Requete {
 	titre: string;
 	description: string;
 	endpoint: string;
+	sql: string;
 	params?: { nom: string; placeholder: string }[];
 }
 
@@ -27,6 +28,10 @@ const requetes: Requete[] = [
 		titre: 'Aéroports d\'une ville',
 		description: 'Liste des aéroports situés dans une ville donnée',
 		endpoint: '/api/aeroports',
+		sql: `SELECT a.nom_aeroport AS nom
+FROM aeroport a
+JOIN ville v ON a.ville_id = v.ville_id
+WHERE v.nom_ville = $1`,
 		params: [{ nom: 'ville', placeholder: 'Paris' }]
 	},
 	{
@@ -34,6 +39,12 @@ const requetes: Requete[] = [
 		titre: 'Vols atterrissant à un aéroport',
 		description: 'Numéro de vol, compagnie et modèle d\'avion',
 		endpoint: '/api/vols',
+		sql: `SELECT v.numero AS numero_vol, c.nom AS compagnie, av.modele
+FROM vol v
+JOIN aeroport aer_arr ON v.aeroport_arrivee = aer_arr.aeroport_id
+JOIN compagnie c ON v.compagnie_id = c.compagnie_id
+JOIN avion av ON v.avion_id = av.avion_id
+WHERE aer_arr.nom_aeroport = $1`,
 		params: [{ nom: 'aeroport', placeholder: 'JFK Airport' }]
 	},
 	{
@@ -41,6 +52,11 @@ const requetes: Requete[] = [
 		titre: 'Compagnies par capacité',
 		description: 'Compagnies avec avions de capacité supérieure à X',
 		endpoint: '/api/compagnies/capacite-min',
+		sql: `SELECT DISTINCT c.nom
+FROM compagnie c
+JOIN vol v ON v.compagnie_id = c.compagnie_id
+JOIN avion a ON v.avion_id = a.avion_id
+WHERE a.capacite > $1`,
 		params: [{ nom: 'capacite', placeholder: '300' }]
 	},
 	{
@@ -48,6 +64,14 @@ const requetes: Requete[] = [
 		titre: 'Pilotes par aéroport',
 		description: 'Pilotes décollant d\'un aéroport donné',
 		endpoint: '/api/pilotes',
+		sql: `SELECT DISTINCT p.nom, p.prenom, c.nom AS nom_compagnie
+FROM vol v
+JOIN operation op ON v.vol_id = op.vol_id
+JOIN personnel p ON op.personnel_id = p.personnel_id
+JOIN pilote pi ON p.personnel_id = pi.personnel_id
+JOIN aeroport aer_dep ON v.aeroport_depart = aer_dep.aeroport_id
+JOIN compagnie c ON v.compagnie_id = c.compagnie_id
+WHERE aer_dep.nom_aeroport = $1`,
 		params: [{ nom: 'aeroport', placeholder: 'Roissy Charles de Gaulle' }]
 	},
 	{
@@ -55,6 +79,17 @@ const requetes: Requete[] = [
 		titre: 'Copilotes par ville',
 		description: 'Copilotes décollant d\'une ville avec vols >= X passagers',
 		endpoint: '/api/copilotes',
+		sql: `SELECT DISTINCT p.nom, p.prenom, c.nom AS nom_compagnie
+FROM vol v
+JOIN operation op ON v.vol_id = op.vol_id
+JOIN personnel p ON op.personnel_id = p.personnel_id
+JOIN copilote co ON p.personnel_id = co.personnel_id
+JOIN aeroport aer_dep ON v.aeroport_depart = aer_dep.aeroport_id
+JOIN ville vi ON aer_dep.ville_id = vi.ville_id
+JOIN compagnie c ON v.compagnie_id = c.compagnie_id
+JOIN vol_passager vp ON v.vol_id = vp.vol_id
+WHERE vi.nom_ville = $1
+AND vp.nb_passagers >= $2`,
 		params: [
 			{ nom: 'ville', placeholder: 'Paris' },
 			{ nom: 'min', placeholder: '200' }
@@ -65,12 +100,26 @@ const requetes: Requete[] = [
 		titre: 'Personnel navigant',
 		description: 'Nom, prénom et date d\'entrée dans la compagnie',
 		endpoint: '/api/navigants',
+		sql: `SELECT p.nom, p.prenom, n.date_entree_compagnie, c.nom AS compagnie
+FROM navigant n
+JOIN personnel p ON n.personnel_id = p.personnel_id
+JOIN compagnie c ON n.compagnie_id = c.compagnie_id
+ORDER BY n.date_entree_compagnie`,
 	},
 	{
 		id: 7,
 		titre: 'Vols de fret',
 		description: 'Vols de fret avec poids supérieur à X kg',
 		endpoint: '/api/fret/poids-min',
+		sql: `SELECT v.numero, vf.poids_kg, c.nom AS compagnie,
+       aer_dep.nom_aeroport AS depart, aer_arr.nom_aeroport AS arrivee
+FROM vol_fret vf
+JOIN vol v ON vf.vol_id = v.vol_id
+JOIN compagnie c ON v.compagnie_id = c.compagnie_id
+JOIN aeroport aer_dep ON v.aeroport_depart = aer_dep.aeroport_id
+JOIN aeroport aer_arr ON v.aeroport_arrivee = aer_arr.aeroport_id
+WHERE vf.poids_kg > $1
+ORDER BY vf.poids_kg DESC`,
 		params: [{ nom: 'poids', placeholder: '10000' }]
 	},
 	{
@@ -78,6 +127,11 @@ const requetes: Requete[] = [
 		titre: 'Avions par constructeur',
 		description: 'Modèles, capacité et date de mise en service',
 		endpoint: '/api/avions/constructeur',
+		sql: `SELECT a.modele, a.capacite, a.date_mise_service
+FROM avion a
+JOIN constructeur c ON a.constructeur_id = c.constructeur_id
+WHERE c.nom = $1
+ORDER BY a.date_mise_service DESC`,
 		params: [{ nom: 'nom', placeholder: 'Airbus' }]
 	},
 	{
@@ -85,13 +139,54 @@ const requetes: Requete[] = [
 		titre: 'Vols d\'une compagnie',
 		description: 'Tous les vols d\'une compagnie donnée',
 		endpoint: '/api/vols/compagnie',
+		sql: `SELECT v.numero, v.date_vol, v.heure_depart, v.heure_arrivee,
+       aer_dep.nom_aeroport AS depart, aer_arr.nom_aeroport AS arrivee,
+       av.modele
+FROM vol v
+JOIN compagnie c ON v.compagnie_id = c.compagnie_id
+JOIN aeroport aer_dep ON v.aeroport_depart = aer_dep.aeroport_id
+JOIN aeroport aer_arr ON v.aeroport_arrivee = aer_arr.aeroport_id
+JOIN avion av ON v.avion_id = av.avion_id
+WHERE c.nom = $1
+ORDER BY v.date_vol, v.heure_depart`,
 		params: [{ nom: 'nom', placeholder: 'Air France' }]
 	},
 	{
 		id: 10,
 		titre: 'Statistiques par compagnie',
-		description: 'Nombre de vols par compagnie',
+		description: 'Nombre de vols par compagnie (LEFT JOIN)',
 		endpoint: '/api/stats/vols-par-compagnie',
+		sql: `SELECT c.nom AS compagnie, COUNT(v.vol_id) AS nombre_vols
+FROM compagnie c
+LEFT JOIN vol v ON c.compagnie_id = v.compagnie_id
+GROUP BY c.compagnie_id, c.nom
+HAVING COUNT(v.vol_id) > 0
+ORDER BY nombre_vols DESC`,
+	},
+	{
+		id: 11,
+		titre: 'Constructeurs et avions (RIGHT JOIN)',
+		description: 'Liste des constructeurs avec leurs avions (inclut constructeurs sans avion)',
+		endpoint: '/api/constructeurs/avions',
+		sql: `SELECT c.nom AS constructeur, a.modele, a.capacite
+FROM avion a
+RIGHT JOIN constructeur c ON a.constructeur_id = c.constructeur_id
+ORDER BY c.nom, a.modele`,
+	},
+	{
+		id: 12,
+		titre: 'Vols > moyenne passagers (Imbriquée)',
+		description: 'Vols avec plus de passagers que la moyenne (requête imbriquée)',
+		endpoint: '/api/stats/vols-passagers-sup-moyenne',
+		sql: `SELECT v.numero, c.nom AS compagnie, vp.nb_passagers,
+       aer_dep.nom_aeroport AS depart, aer_arr.nom_aeroport AS arrivee
+FROM vol_passager vp
+JOIN vol v ON vp.vol_id = v.vol_id
+JOIN compagnie c ON v.compagnie_id = c.compagnie_id
+JOIN aeroport aer_dep ON v.aeroport_depart = aer_dep.aeroport_id
+JOIN aeroport aer_arr ON v.aeroport_arrivee = aer_arr.aeroport_id
+WHERE vp.nb_passagers > (SELECT AVG(nb_passagers) FROM vol_passager)
+ORDER BY vp.nb_passagers DESC`,
 	},
 ];
 
@@ -175,6 +270,17 @@ export function QueriesTab() {
 								<CardDescription>{selectedQuery.description}</CardDescription>
 							</CardHeader>
 							<CardContent className="space-y-4">
+								{/* Requête SQL */}
+								<div className="rounded-md bg-slate-950 p-4 overflow-x-auto">
+									<div className="flex items-center gap-2 text-slate-400 text-xs mb-2">
+										<Code className="h-3 w-3" />
+										SQL
+									</div>
+									<pre className="text-sm text-green-400 font-mono whitespace-pre">
+										{selectedQuery.sql}
+									</pre>
+								</div>
+
 								{/* Paramètres */}
 								{selectedQuery.params && (
 									<div className="flex flex-wrap gap-3">
