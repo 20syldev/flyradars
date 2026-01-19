@@ -151,4 +151,31 @@ router.get('/stats/vols-par-compagnie', async (req, res) => {
 	res.json(result.rows);
 });
 
+// 11. Constructeurs et leurs avions (RIGHT JOIN)
+router.get('/constructeurs/avions', async (req, res) => {
+	const result = await pool.query(`
+		SELECT c.nom AS constructeur, a.modele, a.capacite
+		FROM avion a
+		RIGHT JOIN constructeur c ON a.constructeur_id = c.constructeur_id
+		ORDER BY c.nom, a.modele
+	`);
+	res.json(result.rows);
+});
+
+// 12. Vols avec plus de passagers que la moyenne (requête imbriquée)
+router.get('/stats/vols-passagers-sup-moyenne', async (req, res) => {
+	const result = await pool.query(`
+		SELECT v.numero, c.nom AS compagnie, vp.nb_passagers,
+		       aer_dep.nom_aeroport AS depart, aer_arr.nom_aeroport AS arrivee
+		FROM vol_passager vp
+		JOIN vol v ON vp.vol_id = v.vol_id
+		JOIN compagnie c ON v.compagnie_id = c.compagnie_id
+		JOIN aeroport aer_dep ON v.aeroport_depart = aer_dep.aeroport_id
+		JOIN aeroport aer_arr ON v.aeroport_arrivee = aer_arr.aeroport_id
+		WHERE vp.nb_passagers > (SELECT AVG(nb_passagers) FROM vol_passager)
+		ORDER BY vp.nb_passagers DESC
+	`);
+	res.json(result.rows);
+});
+
 export default router;
